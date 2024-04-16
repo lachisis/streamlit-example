@@ -1,4 +1,5 @@
 import pandas as pd
+import constants 
 
 def get_fields_id_to_name_map(fields_from_github):
     return {
@@ -11,7 +12,6 @@ def explode_dict_col(df, col):
     tmp.columns = [f"{col}_{x}" for x in tmp.columns]
     return pd.concat([df, tmp], axis=1).drop(col, axis=1)
 
-# %%
 def explode_list_col(df, col):
     keys = df[col].explode().explode().unique() #iloc[0][0].keys()
     keys = [key for key in keys if not pd.isnull(key)] # remove nones
@@ -106,13 +106,16 @@ def format_tickets_df(df_issues, fields_id_to_name_map, people_list):
     df_issues_per_user = df_issues.explode('content_assignees_nodes_login')
 
     df_issues_per_user = df_issues_per_user[df_issues_per_user["content_assignees_nodes_login"].isin(people_list)]
-    g = df_issues_per_user.groupby(['content_assignees_nodes_login', 'closedAt_Friday'])["size_all"].sum().to_frame()
-    g['rollingAvg_size_all'] = g['size_all'].rolling(4).mean()
-    g = g.reset_index()
-    g = pd.melt(g, id_vars=['content_assignees_nodes_login', 'closedAt_Friday'], value_vars=['rollingAvg_size_all', 'size_all'])
-    return g
+    df_issues_per_user.rename(columns={"content_assignees_nodes_login": "assignee"}, inplace=True)
+    f = df_issues_per_user.groupby(['assignee', 'closedAt_Friday'])["size_all"].sum().to_frame()
+    f['rollingAvg_size_all'] = f['size_all'].rolling(4).mean()
+    
+    f = f.reset_index()
+    g = pd.melt(f, id_vars=['assignee', 'closedAt_Friday'], value_vars=['rollingAvg_size_all', 'size_all'])
+    
+    return f,g
 
-def format_prs_df(prs, people_list):
+def format_prs_df(prs, people_list=constants.PEOPLE_LIST):
     df_prs = pd.DataFrame(prs)
 
     df_prs = explode_dict_col(df_prs, "author")
@@ -123,10 +126,10 @@ def format_prs_df(prs, people_list):
         pd.to_datetime(df_prs['closedAt']) + Week(weekday=4)).dt.date
 
     df_prs = df_prs[df_prs["author_login"].isin(people_list)]
-    g = df_prs.groupby(['author_login', 'closedAt_Friday'])['closed'].count().to_frame()
-    g['rollingAvg_closed'] = g['closed'].rolling(4).mean()
-    g = g.reset_index()
-    g = pd.melt(g, id_vars=['author_login', 'closedAt_Friday'], value_vars=['rollingAvg_closed', 'closed'])
+    f = df_prs.groupby(['author_login', 'closedAt_Friday'])['closed'].count().to_frame()
+    f['rollingAvg_closed'] = f['closed'].rolling(4).mean()
+    f = f.reset_index()
+    g = pd.melt(f, id_vars=['author_login', 'closedAt_Friday'], value_vars=['rollingAvg_closed', 'closed'])
 
     df_pr_reviews = df_prs.explode('reviews_nodes')
     df_pr_reviews = explode_dict_col(df_pr_reviews, 'reviews_nodes')
@@ -136,11 +139,35 @@ def format_prs_df(prs, people_list):
         pd.to_datetime(df_pr_reviews['reviews_nodes_createdAt']) + Week(weekday=4)).dt.date
     
     df_pr_reviews = df_pr_reviews[df_pr_reviews["reviews_nodes_author_login"].isin(people_list)]
-    h = df_pr_reviews.groupby(['reviews_nodes_author_login', 'createdAt_Friday'])["reviews_nodes_createdAt"].count().to_frame()
+    df_pr_reviews.rename(columns={"reviews_nodes_author_login": "author"}, inplace=True)
+    h = df_pr_reviews.groupby(['author', 'createdAt_Friday'])["reviews_nodes_createdAt"].count().to_frame()
     h.columns = ['created']
     h['rollingAvg_created'] = h['created'].rolling(4).mean()
     h = h.reset_index()
-    h = pd.melt(h, id_vars=['reviews_nodes_author_login', 'createdAt_Friday'], value_vars=['rollingAvg_created', 'created'])
+    j = pd.melt(h, id_vars=['author', 'createdAt_Friday'], value_vars=['rollingAvg_created', 'created'])
     
-    return g,h
+    return f,g,h,j
 
+
+def generate_ticket_df(github_items, github_fields, people_list=constants.PEOPLE_LIST):
+
+    fields_id_to_name_map = get_fields_id_to_name_map(github_fields)
+
+    df_issues = [] 
+    for i,issue in enumerate(github_items):
+        df_issues.append(issue)
+
+    
+    df_issues = pd.DataFrame(df_issues)
+    df_issues_orig = df_issues.copy()
+
+    df_issues_raw, df_issues_melted = format_tickets_df(df_issues_orig, fields_id_to_name_map, people_list)
+    return df_issues_raw, df_issues_melted
+
+def build_table(df, time_col, person_col, value_col):
+    max_count = df.drop(columns=[time_col]).groupby([person_col]).count().max()
+    a = df.drop(columns=[time_col]).groupby([person_col]).mean().sort_values(value_col)
+    b = (df.drop(columns=[time_col]).fillna(0).groupby([person_col]).sum()/max_count).sort_values(value_col)
+    
+    c = pd.merge(a,b, on=person_col, suffixes=('_contributed', '_all_weeks'))[[f'{value_col}_contributed', f'{value_col}_all_weeks']]    
+    return c

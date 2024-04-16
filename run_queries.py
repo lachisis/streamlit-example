@@ -2,50 +2,21 @@
 import requests 
 import json
 from query import github_pull_requests_query, github_item_query, github_add_option_to_card_mutation
-import pandas as pd
-import utils_df
-import os
+import utils
+import constants
 
-# Replace with your GitHub personal access token
-GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
-
-ORG = "servicenow"
-PROJECT = "SNR-LABS"
-PROJECT_ID = 10
-TEAM_SLUG = "sn-research-labs"
-ORG_ID = "O_kgDOAGRc8A" #"MDEyOk9yZ2FuaXphdGlvbjY1NzczOTI"
-REPOSITORIES = ['research-now-llm', 'web2dataset', 'research-lm-evaluation-harness-wrapper']
-PEOPLE_LIST = ['lachisis', 'nitsanluke', 'gebelangsn',
-    'christyler3030', 'mmunozm', 'danieltremblay', 'tianyi-chen',
-    'erikchwang', 'mebrunet' ]
-
-# Set up the request headers and endpoint URL
-# Add schema preview in the Accept header 
-headers = {"Authorization": f"Bearer {GITHUB_TOKEN}",
-           "Accept": "application/vnd.github.starfox-preview+json"}
-url = "https://api.github.com/graphql"
-
-variables = {"project_number": PROJECT_ID, "org": ORG}
-pagination_str = "first: 100"
-variables2 = {
-    "org": ORG, 
-    "teamslug": TEAM_SLUG,
-    "orgID": ORG_ID
-}
     
 def add_option_to_card(project_Id, item_Id, field_Id, value):
     mutation = github_add_option_to_card_mutation()
     variables = {"projectId": project_Id, "itemId": item_Id, "fieldId": field_Id, "value": value}
-    response = requests.post(url, headers=headers, json={"query": mutation, "variables": variables})
+    response = requests.post(constants.url, headers=constants.headers, json={"query": mutation, "variables": variables})
 
-    #print(response.json())
     response = response.json()
     print(response)
-    print(response.headers)
     #new_card_id = response["data"]["updateProjectV2ItemFieldValue"]["projectV2Item"]["id"]
     #return new_card_id   
         
-def get_paginated_prs(repositories=REPOSITORIES):
+def get_paginated_prs(repositories=constants.REPOSITORIES):
     
     prs = []
     for repository in repositories: 
@@ -53,14 +24,14 @@ def get_paginated_prs(repositories=REPOSITORIES):
         print(repository)
         variables = {
             "reponame": repository,
-            "org": ORG
+            "org": constants.ORG
         }
         
         has_next_page = True
         while has_next_page:
             print(repository + '-' * 80)
             query = github_pull_requests_query(pagination_str)
-            response = requests.post(url, headers=headers, json={"query": query, 
+            response = requests.post(constants.url, headers=constants.headers, json={"query": query, 
                                                                 "variables": variables})
             print(response)
             response = response.json()
@@ -84,7 +55,7 @@ def get_paginated_github_items(variables):
         print('-' * 80)
         # Make the request and print the response JSON
         query = github_item_query(pagination_str)
-        response = requests.post(url, headers=headers, json={"query": query, "variables": variables})
+        response = requests.post(constants.url, headers=constants.headers, json={"query": query, "variables": variables})
 
         print(response)
         response = response.json()["data"]
@@ -148,34 +119,22 @@ def update_dates_on_cards(items):
 
     print(i,updated_created, updated_closed)
     
-def _save_github_data_to_file(github_items, github_fields):
-    with open('github_items.json', 'w') as f:
-        json.dump(github_items, f)
-    with open('github_fields.json', 'w') as f:
-        json.dump(github_fields, f)
 
-def generate_ticket_df(DEBUG=True, people_list=PEOPLE_LIST):
-    if DEBUG:
-        github_items = json.load(open('github_items.json'))
-        github_fields = json.load(open('github_fields.json'))
-    else:
-        github_items, github_fields = get_paginated_github_items(variables=variables) 
-        _save_github_data_to_file(github_items, github_fields)
-        update_dates_on_cards(github_items)
-        _save_github_data_to_file(github_items, github_fields)
+def regenerate_ticket_data(date):
+    github_items, github_fields = get_paginated_github_items(variables=constants.variables) 
+    utils.save_github_data_to_file(date, github_items, github_fields)
+    update_dates_on_cards(github_items)
+    utils.save_github_data_to_file(date, github_items, github_fields)
 
-    fields_id_to_name_map = utils_df.get_fields_id_to_name_map(github_fields)
-
-    df_issues = [] 
-    for i,issue in enumerate(github_items):
-        df_issues.append(issue)
-
+    return github_items, github_fields
     
-    df_issues = pd.DataFrame(df_issues)
-    df_issues_orig = df_issues.copy()
 
-    df_issues = utils_df.format_tickets_df(df_issues_orig, fields_id_to_name_map, people_list)
-    return df_issues
+def regenerate_prs_data(date):
+    github_prs = get_paginated_prs()
+    utils.save_github_prs_data_to_file(date, github_prs)
+
+    return github_prs
+
 
 
 
