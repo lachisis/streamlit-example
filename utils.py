@@ -19,9 +19,11 @@ def load_existing_data(fileprefix, extension="json"):
     files = [file for file in pathlib.Path('.').glob(f"{fileprefix}_*.{extension}")]
     if len(files) == 0:
         return None
-    files.sort()
+    files.sort(key=lambda x: str(x))
+    #print(files)
     latest_file = files[-1]
     latest_date = datetime.datetime.strptime("_".join(files[-1].stem.split('_')[-2:]), "%Y-%m-%d_%H-%M-%S")
+    print('Loading latest file: ', latest_file, latest_date)
     if extension == "json":
         return json.load(open(latest_file)), latest_date
     elif extension == "csv":
